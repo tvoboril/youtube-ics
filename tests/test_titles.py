@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from youtube_ics.enrich import LiturgicalInfo, parse_day_html, _ordinal
+from youtube_ics.enrich import LiturgicalInfo, _ordinal
 from youtube_ics.models import Broadcast, Office
 from youtube_ics.titles import build_description, build_title
 
@@ -21,7 +21,7 @@ def test_ordinals():
 
 def test_sunday_title_matches_published_format():
     bc = _bc(Office.ORTHROS_LITURGY, "Orthros and Divine Liturgy", 2026, 7, 5, 9)
-    info = LiturgicalInfo(tone=5, season="After Pentecost", pent_week=6,
+    info = LiturgicalInfo(tone=5, season="After Pentecost", week_of_season=6,
                           saints=["Holy Father Athanasios of Athos"])
     assert build_title(bc, info) == (
         "Orthros (Tone 5) and Divine Liturgy - 6th Sunday after Pentecost - 5 July 2026"
@@ -30,7 +30,7 @@ def test_sunday_title_matches_published_format():
 
 def test_feast_takes_precedence_over_sunday_counter():
     bc = _bc(Office.ORTHROS_LITURGY, "Orthros and Divine Liturgy", 2026, 5, 31, 9)
-    info = LiturgicalInfo(tone=8, season="After Pentecost", pent_week=1,
+    info = LiturgicalInfo(tone=8, season="After Pentecost", week_of_season=1,
                           primary_feast="Sunday of All Saints")
     assert "Sunday of All Saints" in build_title(bc, info)
     assert "Sunday after Pentecost" not in build_title(bc, info)
@@ -69,25 +69,3 @@ def test_description_shape():
     assert lines[1] == ""
     assert lines[2] == "Holy Martyr Leontios"
     assert desc.rstrip().endswith("http://www.melkitepat.org/")
-
-
-SAMPLE_HTML = """
-<span class="pill tone">Tone 5</span>
-<span class="pill season">After Pentecost</span>
-<span class="detail-label">Pent Week</span><span class="detail-value">6</span>
-<section class="section feasts-section"><h3>Feasts</h3><p class="empty">No feasts</p></section>
-<section class="section saints-section"><h3>Saints</h3><ul class="saint-list">
-<li><span class="badge badge-class">Class 5</span> Holy Father Athanasios of Athos</li>
-<li><span class="badge badge-class">Class 5</span> Holy Wonderworker Lampados &amp; Martha</li>
-</ul></section>
-"""
-
-
-def test_parse_day_html():
-    info = parse_day_html(SAMPLE_HTML)
-    assert info.tone == 5
-    assert info.season == "After Pentecost"
-    assert info.pent_week == 6
-    assert info.sunday_after_pentecost == "6th Sunday after Pentecost"
-    assert info.primary_feast is None
-    assert info.saints == ["Holy Father Athanasios of Athos", "Holy Wonderworker Lampados & Martha"]

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from . import ics
 from .config import Config
-from .enrich import ApiTypikonSource, LiturgicalInfo, ScrapeTypikonSource, TypikonSource
+from .enrich import ApiTypikonSource, LiturgicalInfo, TypikonSource
 from .models import Broadcast
 from .titles import build_description, build_title
 
@@ -48,12 +48,7 @@ def build_plan(
     now = now or datetime.now(ics.PARISH_TZ)
     window_end = now + timedelta(days=cfg.lookahead_days)
     cal = cal if cal is not None else ics.fetch_ics(cfg.ics_url)
-    if typikon is None:
-        typikon = (
-            ApiTypikonSource(cfg.typikon_api_url)
-            if cfg.typikon_api_url
-            else ScrapeTypikonSource(parish=cfg.parish, base_url=cfg.typikon_base_url)
-        )
+    typikon = typikon or ApiTypikonSource(cfg.typikon_api_url)
 
     occurrences = ics.expand_office_occurrences(cal, now, window_end)
     broadcasts = ics.assemble_broadcasts(occurrences)

@@ -17,13 +17,14 @@ def default_ics_url() -> str:
     return f"https://calendar.google.com/calendar/ical/{quote(cal_id)}/public/basic.ics"
 
 
+DEFAULT_TYPIKON_API_URL = "https://melkitetypikon.org"
+
+
 @dataclass
 class Config:
     ics_url: str
     lookahead_days: int  # schedule at most this far out (1 week default, 2 max)
-    parish: str
-    typikon_base_url: str  # scraper fallback (melkitetypikon.org HTML)
-    typikon_api_url: str | None  # if set, use the JSON API instead of scraping
+    typikon_api_url: str  # melkite-typikon liturgical-day JSON API base URL
     stream_key: str | None  # ATEM RTMP key -> resolved to a liveStream id for bind
     db_path: str  # SQLite state file
 
@@ -34,9 +35,7 @@ class Config:
         return cls(
             ics_url=os.environ.get("ICS_URL", default_ics_url()),
             lookahead_days=days,
-            parish=os.environ.get("PARISH", "saintgeorge"),
-            typikon_base_url=os.environ.get("TYPIKON_BASE_URL", "https://melkitetypikon.org"),
-            typikon_api_url=os.environ.get("TYPIKON_API_URL"),
+            typikon_api_url=os.environ.get("TYPIKON_API_URL", DEFAULT_TYPIKON_API_URL),
             stream_key=os.environ.get("YOUTUBE_STREAM_KEY"),
             db_path=os.environ.get("DB_PATH", "youtube_ics.sqlite"),
         )

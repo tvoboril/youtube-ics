@@ -2,6 +2,9 @@
 name = "youtube-ics"
 version = "0.1.0"
 description = "Create YouTube scheduled live broadcasts from a Google Calendar ICS feed."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Tomas Voboril" }]
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
@@ -20,7 +23,7 @@ dev = ["pytest>=8.0"]
 youtube-ics = "youtube_ics.cli:main"
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

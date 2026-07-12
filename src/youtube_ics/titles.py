@@ -27,7 +27,7 @@ def office_label(bc: Broadcast, info: LiturgicalInfo) -> str:
     if bc.office is Office.VESPERS:
         if info.vespers_rank is not None:
             return "Great Vespers" if info.vespers_rank == "great" else "Vespers"
-        # Scraper fallback (no authoritative rank): a feast on the day ⇒ Great Vespers.
+        # Fallback if the API omits a rank: a feast on the day ⇒ Great Vespers.
         if info.primary_feast or bc.office_label == "Great Vespers":
             return "Great Vespers"
         return "Vespers"

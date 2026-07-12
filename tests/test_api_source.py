@@ -7,7 +7,7 @@ from youtube_ics.titles import build_title, office_label
 
 CT = ZoneInfo("America/Chicago")
 
-# Sample payloads copied from docs/typikon-api-handoff.md
+# Sample /api/liturgical-day/:date payloads
 ORDINARY_SUNDAY = {
     "date": "2026-07-05", "tone": 5, "season": "after-pentecost", "weekOfSeason": 6,
     "isSunday": True, "dayName": "6th Sunday after Pentecost", "namedDays": [], "feasts": [],
@@ -40,7 +40,7 @@ def _bc(office, label, y, m, d, hh):
 
 def test_mapping_basic_fields():
     info = liturgical_info_from_api(ORDINARY_SUNDAY)
-    assert info.tone == 5 and info.pent_week == 6
+    assert info.tone == 5 and info.week_of_season == 6
     assert info.primary_feast is None  # ordinary Sunday: no feast
     assert info.sunday_name == "6th Sunday after Pentecost"
     assert info.vespers_rank == "great"
@@ -69,7 +69,7 @@ def test_vespers_rank_drives_label_authoritatively():
     assert office_label(bc, daily) == "Vespers"
 
 
-def test_vespers_rank_overrides_scraper_feast_heuristic():
+def test_vespers_rank_is_authoritative_over_feast_presence():
     # Even if a (weekday) feast is present, an explicit "daily" rank must win.
     info = liturgical_info_from_api(
         {**ORDINARY_WEEKDAY, "feasts": [{"name": "Some Minor Feast", "rank": "simple"}],
