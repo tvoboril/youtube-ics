@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Outbound-only job (pull ICS + typikon API, call the YouTube API). No inbound
+    # ports, no tunnel — default bridge networking gives outbound internet.
+    environment:
+      # Keep the SQLite state on the mounted volume (idempotency depends on it).
+      - DB_PATH=/data/youtube_ics.sqlite
+    volumes:
+      - ./data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -102,6 +102,50 @@ handful of events/day, but batch/limit the sync frequency.
 `google-api-python-client`, `google-auth`, `google-auth-oauthlib` (OAuth),
 `icalendar`, `recurring-ical-events`, plus `httpx`/`requests` for fetching the ICS.
 
+## Deploy on a Proxmox LXC (ADR-0002, outbound-only flavor)
+
+youtube-ics has **no inbound endpoint** — it only pulls the ICS + typikon API and calls the
+YouTube API — so it needs no published ports and no Cloudflare tunnel. It runs
+`youtube-ics run`, a loop that reconciles then sleeps until 15 min before the next event.
+
+**1. Mint the refresh token once (on a workstation with a browser), not on the LXC:**
+```bash
+youtube-ics auth --client-secrets client_secret.json   # writes GOOGLE_OAUTH_* into .env
+youtube-ics list-streams                               # confirm YOUTUBE_STREAM_KEY resolves
+```
+Only the resulting `.env` values travel to the box; `client_secret.json` is **not** needed at
+runtime.
+
+**2. Create the LXC** (on the Proxmox host; Docker needs the nesting flags):
+```bash
+pct create <vmid> local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname youtube-ics --cores 1 --memory 512 --swap 512 \
+  --rootfs vmdata:8 --net0 name=eth0,bridge=vmbr0,ip=dhcp,type=veth \
+  --features nesting=1,keyctl=1 --unprivileged 1 --onboot 1 \
+  --ssh-public-keys /root/.ssh/authorized_keys
+pct start <vmid>
+```
+
+**3. Provision inside the LXC:**
+```bash
+apt-get update && apt-get install -y curl ca-certificates
+curl -fsSL https://get.docker.com | sh
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519   # add the .pub as a READ-ONLY deploy key
+git clone git@github.com:tvoboril/youtube-ics /opt/youtube-ics
+cd /opt/youtube-ics
+# Copy the .env produced in step 1 to /opt/youtube-ics/.env — it must contain:
+#   GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN
+#   YOUTUBE_STREAM_KEY
+#   TYPIKON_API_URL=https://melkitetypikon.org
+#   ICS_URL=<private secret iCal URL>   (fresher than public basic.ics)
+docker compose up -d --build
+docker compose logs -f
+```
+
+**Operate:** `./update.sh` (git pull + rebuild + restart). SQLite state persists in
+`./data`. `DB_PATH` is set to `/data/youtube_ics.sqlite` by compose — don't lose that volume
+(it's the create/update/cancel idempotency source).
+
 ## Related
 
 - [`../youtube-social-poster`](../youtube-social-poster) — downstream consumer (live → FB).
