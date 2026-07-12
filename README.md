@@ -59,11 +59,13 @@ youtube-ics auth --client-secrets client_secret.json
 youtube-ics list-streams          # confirm YOUTUBE_STREAM_KEY resolves to a liveStream
 youtube-ics sync --dry-run        # preview create/adopt/update/cancel actions
 youtube-ics sync                  # apply them
-youtube-ics run                   # loop: reconcile, then sleep to 15 min before next event
+youtube-ics run                   # loop: reconcile, then sleep until the next wake
 ```
 
-`run` is the long-lived entrypoint: it keeps the window populated and re-checks each event
-shortly before it starts, so a last-minute cancellation removes the YouTube event in time.
+`run` is the long-lived entrypoint. After each reconcile it sleeps until the **earlier of**
+15 minutes before the next event and one hour from now — so it does a last-minute
+cancellation check right before each service, while still re-checking at least hourly to
+pick up anything added to the calendar during the day.
 
 **Channel note:** the channel must have live streaming enabled, and the OAuth consent must
 be given by an account that owns the channel in the OAuth sense. For a **Brand Account**,
