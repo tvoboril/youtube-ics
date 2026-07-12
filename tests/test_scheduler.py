@@ -14,18 +14,25 @@ def _pb(y, m, d, hh, mm=0):
     return PlannedBroadcast(broadcast=bc, title="t", description="d")
 
 
-def test_picks_15min_before_earliest_future_event():
-    now = datetime(2026, 7, 11, 8, 0, tzinfo=CT)
-    plan = [_pb(2026, 7, 15, 18, 0), _pb(2026, 7, 12, 9, 0)]
-    assert next_run_at(plan, now) == datetime(2026, 7, 12, 8, 45, tzinfo=CT)
+def test_wakes_15min_before_an_imminent_event():
+    now = datetime(2026, 7, 12, 8, 0, tzinfo=CT)  # event within the hour
+    plan = [_pb(2026, 7, 12, 8, 30), _pb(2026, 7, 15, 18, 0)]
+    assert next_run_at(plan, now) == datetime(2026, 7, 12, 8, 15, tzinfo=CT)
+
+
+def test_hourly_cap_when_next_event_is_far():
+    now = datetime(2026, 7, 11, 8, 0, tzinfo=CT)  # next event days away
+    plan = [_pb(2026, 7, 12, 9, 0), _pb(2026, 7, 15, 18, 0)]
+    assert next_run_at(plan, now) == now + timedelta(hours=1)  # safety-net check
 
 
 def test_skips_events_whose_lead_window_already_opened():
     now = datetime(2026, 7, 12, 8, 50, tzinfo=CT)  # inside the 9:00 event's 15-min lead
     plan = [_pb(2026, 7, 12, 9, 0), _pb(2026, 7, 15, 18, 0)]
-    assert next_run_at(plan, now) == datetime(2026, 7, 15, 17, 45, tzinfo=CT)
+    # 9:00 is skipped (handled this run); next real event is far → hourly ceiling
+    assert next_run_at(plan, now) == now + timedelta(hours=1)
 
 
-def test_fallback_when_no_upcoming_events():
+def test_hourly_when_no_upcoming_events():
     now = datetime(2026, 7, 11, 8, 0, tzinfo=CT)
-    assert next_run_at([], now, fallback=timedelta(hours=24)) == now + timedelta(hours=24)
+    assert next_run_at([], now) == now + timedelta(hours=1)
