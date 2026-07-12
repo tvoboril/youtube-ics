@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from youtube_ics.models import Broadcast, Office
 from youtube_ics.plan import PlannedBroadcast
-from youtube_ics.sink import FakeSink
+from youtube_ics.sink import ExistingBroadcast, FakeSink
 from youtube_ics.store import Store
 from youtube_ics.sync import reconcile
 
@@ -81,6 +81,42 @@ def test_dry_run_mutates_nothing():
     assert summary.created == 1
     assert not sink.created  # sink untouched
     assert store.get(plan[0].key) is None  # store untouched
+
+
+def test_empty_store_adopts_existing_broadcast_instead_of_duplicating():
+    # Simulates a lost/rebuilt store: the broadcast already exists on the channel.
+    store, sink = Store(":memory:"), FakeSink()
+    p = _pb("a", 2026, 7, 12, title="Vespers - X - 12 July 2026")
+    sink.existing = [
+        ExistingBroadcast("existing-yt-1", p.title, p.start_utc.isoformat())
+    ]
+    summary = _reconcile([p], store, sink)
+    assert (summary.created, summary.adopted) == (0, 1)  # adopted, not created
+    assert not sink.created
+    assert store.get(p.key).youtube_id == "existing-yt-1"  # mapping recorded
+    # a second run is a plain no-op now that it's in the store
+    summary2 = _reconcile([p], store, FakeSink())
+    assert summary2.unchanged == 1
+
+
+def test_adopt_with_different_title_updates_existing():
+    store, sink = Store(":memory:"), FakeSink()
+    p = _pb("a", 2026, 7, 12, title="New Title")
+    sink.existing = [
+        ExistingBroadcast("existing-yt-9", "Stale Title", p.start_utc.isoformat())
+    ]
+    summary = _reconcile([p], store, sink)
+    assert summary.updated == 1 and summary.created == 0
+    assert sink.updated[0][0] == "existing-yt-9"  # updates the existing one in place
+    assert store.get(p.key).youtube_id == "existing-yt-9"
+
+
+def test_no_adopt_when_start_differs():
+    store, sink = Store(":memory:"), FakeSink()
+    p = _pb("a", 2026, 7, 12)
+    sink.existing = [ExistingBroadcast("other", p.title, "2020-01-01T00:00:00Z")]
+    summary = _reconcile([p], store, sink)
+    assert summary.created == 1 and summary.adopted == 0  # different slot → real create
 
 
 def test_cancelled_then_reappears_is_recreated():

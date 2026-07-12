@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from .plan import PlannedBroadcast
-from .sink import BroadcastSink
+from .sink import BroadcastSink, ExistingBroadcast
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -67,6 +67,28 @@ class YouTubeSink(BroadcastSink):
 
     def cancel(self, youtube_id: str) -> None:
         self._svc.liveBroadcasts().delete(id=youtube_id).execute()
+
+    def list_upcoming(self) -> list[ExistingBroadcast]:
+        out: list[ExistingBroadcast] = []
+        page_token = None
+        while True:
+            req = self._svc.liveBroadcasts().list(
+                part="id,snippet", broadcastStatus="upcoming", maxResults=50,
+                pageToken=page_token,
+            )
+            resp = req.execute()
+            for it in resp.get("items", []):
+                snip = it.get("snippet", {})
+                out.append(
+                    ExistingBroadcast(
+                        youtube_id=it["id"],
+                        title=snip.get("title", ""),
+                        start_utc=snip.get("scheduledStartTime", ""),
+                    )
+                )
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                return out
 
     # --- stream binding -----------------------------------------------------------------
     def _bind(self, broadcast_id: str) -> None:

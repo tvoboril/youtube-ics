@@ -21,6 +21,7 @@ _SYMBOL = {
     ActionKind.UPDATE: "~ update",
     ActionKind.NOOP: "· unchanged",
     ActionKind.CANCEL: "✗ cancel",
+    ActionKind.ADOPT: "⇄ adopt",
 }
 
 
@@ -36,7 +37,15 @@ def _cmd_sync(args: argparse.Namespace) -> int:
 
     header = "Dry run" if args.dry_run else "Sync"
     if args.dry_run:
-        sink = FakeSink()
+        # Use the real sink for read-only list_upcoming (accurate adopt/create preview) when
+        # credentials are present; writes stay guarded by dry_run. Fall back to FakeSink
+        # (plan-only preview) if there are no credentials.
+        try:
+            from .youtube import YouTubeSink, build_service_from_env
+
+            sink = YouTubeSink(build_service_from_env(), stream_key=cfg.stream_key)
+        except Exception:
+            sink = FakeSink()
     else:
         from .youtube import YouTubeSink, build_service_from_env
 
@@ -58,7 +67,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         title = p.title if p else a.key
         print(f"  {_SYMBOL[a.kind]:12} {when}  {title}")
     print(
-        f"\n  create={summary.created} update={summary.updated} "
+        f"\n  create={summary.created} adopt={summary.adopted} update={summary.updated} "
         f"unchanged={summary.unchanged} cancel={summary.cancelled}"
     )
     store.close()
@@ -135,8 +144,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         nxt = next_run_at(plan, now)
         print(
-            f"[{now:%Y-%m-%d %H:%M %Z}] create={summary.created} update={summary.updated} "
-            f"unchanged={summary.unchanged} cancel={summary.cancelled} "
+            f"[{now:%Y-%m-%d %H:%M %Z}] create={summary.created} adopt={summary.adopted} "
+            f"update={summary.updated} unchanged={summary.unchanged} cancel={summary.cancelled} "
             f"→ next run {nxt:%Y-%m-%d %H:%M %Z}",
             flush=True,
         )

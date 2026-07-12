@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 
 from .plan import PlannedBroadcast
-from .sink import BroadcastSink
+from .sink import BroadcastSink, ExistingBroadcast
 from .store import Store
 
 
@@ -20,6 +20,17 @@ class ActionKind(str, Enum):
     UPDATE = "update"
     NOOP = "noop"
     CANCEL = "cancel"
+    ADOPT = "adopt"  # store was empty/lost but the broadcast already exists → record it
+
+
+def _instant(iso: str) -> float | None:
+    """Parse an RFC3339 timestamp to a comparable UTC instant (seconds), or None."""
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -36,17 +47,34 @@ def plan_actions(
     *,
     window_start_utc: datetime,
     window_end_utc: datetime,
+    existing: list[ExistingBroadcast] | None = None,
 ) -> list[Action]:
     """Decide actions. Vanish-scan is scoped to the planning window so we never cancel past
-    broadcasts or ones scheduled beyond the horizon."""
+    broadcasts or ones scheduled beyond the horizon. When the store has no row for a planned
+    broadcast, adopt a channel broadcast at the same start instant instead of creating a
+    duplicate (self-heals a lost/empty store)."""
     actions: list[Action] = []
     planned_keys: set[str] = set()
+    # index existing channel broadcasts by their scheduled start instant
+    by_instant: dict[float, ExistingBroadcast] = {}
+    for eb in existing or []:
+        inst = _instant(eb.start_utc)
+        if inst is not None:
+            by_instant.setdefault(inst, eb)
 
     for p in plan:
         planned_keys.add(p.key)
         rec = store.get(p.key)
         if rec is None or rec.status == "cancelled":
-            actions.append(Action(ActionKind.CREATE, p.key, planned=p))
+            match = by_instant.get(_instant(p.start_utc.isoformat()))
+            if match is not None:
+                # broadcast already exists on the channel — adopt it, don't create.
+                if match.title == p.title:
+                    actions.append(Action(ActionKind.ADOPT, p.key, planned=p, youtube_id=match.youtube_id))
+                else:
+                    actions.append(Action(ActionKind.UPDATE, p.key, planned=p, youtube_id=match.youtube_id))
+            else:
+                actions.append(Action(ActionKind.CREATE, p.key, planned=p))
         elif rec.content_hash != p.content_hash:
             actions.append(Action(ActionKind.UPDATE, p.key, planned=p, youtube_id=rec.youtube_id))
         else:
@@ -64,6 +92,10 @@ def apply_action(action: Action, store: Store, sink: BroadcastSink) -> None:
         p = action.planned
         yt = sink.create(p)
         store.upsert(p.key, yt, p.title, p.start_utc.isoformat(), p.content_hash)
+    elif action.kind is ActionKind.ADOPT:
+        # already on the channel + content matches: just record the mapping, no API call.
+        p = action.planned
+        store.upsert(p.key, action.youtube_id, p.title, p.start_utc.isoformat(), p.content_hash)
     elif action.kind is ActionKind.UPDATE:
         p = action.planned
         sink.update(action.youtube_id, p)
@@ -80,6 +112,7 @@ class ReconcileSummary:
     updated: int = 0
     unchanged: int = 0
     cancelled: int = 0
+    adopted: int = 0
     actions: list[Action] = field(default_factory=list)
 
 
@@ -88,6 +121,7 @@ _COUNT_FIELD = {
     ActionKind.UPDATE: "updated",
     ActionKind.NOOP: "unchanged",
     ActionKind.CANCEL: "cancelled",
+    ActionKind.ADOPT: "adopted",
 }
 
 
@@ -101,7 +135,8 @@ def reconcile(
     dry_run: bool = False,
 ) -> ReconcileSummary:
     actions = plan_actions(
-        plan, store, window_start_utc=window_start_utc, window_end_utc=window_end_utc
+        plan, store, window_start_utc=window_start_utc, window_end_utc=window_end_utc,
+        existing=sink.list_upcoming(),
     )
     summary = ReconcileSummary(actions=actions)
     for a in actions:
