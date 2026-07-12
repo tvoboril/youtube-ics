@@ -60,6 +60,18 @@ def test_other_service_is_name_and_date_only():
     assert desc.rstrip().endswith("http://www.melkitepat.org/")
 
 
+def test_long_title_trims_commemoration_keeps_office_and_date():
+    bc = _bc(Office.VESPERS, "Great Vespers", 2026, 7, 22, 18)
+    long = ("Transfer of the Remains of the Holy and Illustrious Great-Martyr "
+            "Nobody of Somewhereville in Deepest Asia Minor")
+    info = LiturgicalInfo(primary_feast=long)
+    title = build_title(bc, info)
+    assert len(title) <= 100
+    assert title.startswith("Great Vespers - ")
+    assert title.endswith(" - 22 July 2026")  # date preserved
+    assert "…" in title
+
+
 def test_description_shape():
     bc = _bc(Office.VESPERS, "Vespers", 2026, 6, 17, 18)
     info = LiturgicalInfo(saints=["Holy Martyr Leontios"])

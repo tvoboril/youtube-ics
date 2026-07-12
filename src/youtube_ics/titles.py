@@ -54,13 +54,24 @@ def _fmt_date(d: date) -> str:
     return f"{d.day} {d:%B %Y}"  # e.g. "5 July 2026"
 
 
+TITLE_MAX = 100  # YouTube's hard limit on video/broadcast titles
+
+
 def build_title(bc: Broadcast, info: LiturgicalInfo) -> str:
-    parts = [office_label(bc, info)]
+    office = office_label(bc, info)
+    date = _fmt_date(bc.local_date)
     commem = commemoration(bc, info)
-    if commem:
-        parts.append(commem)
-    parts.append(_fmt_date(bc.local_date))
-    return " - ".join(parts)
+    if not commem:
+        return f"{office} - {date}"[:TITLE_MAX]
+    full = f"{office} - {commem} - {date}"
+    if len(full) <= TITLE_MAX:
+        return full
+    # Too long: trim the commemoration (on a word boundary), keeping office + date intact.
+    overhead = len(office) + len(date) + len(" - ") * 2 + len("…")
+    trimmed = commem[: max(0, TITLE_MAX - overhead)].rstrip()
+    if " " in trimmed:
+        trimmed = trimmed[: trimmed.rfind(" ")].rstrip()
+    return f"{office} - {trimmed}… - {date}"
 
 
 def build_description(bc: Broadcast, info: LiturgicalInfo) -> str:
