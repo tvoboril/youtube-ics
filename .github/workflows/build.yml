@@ -74,6 +74,20 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
+      # --- Vulnerability scan (SLSA Phase E) — REPORT-ONLY for now --------------
+      # Scan the pushed image for HIGH+CRITICAL CVEs (fixable only). Report-only
+      # (`--exit-code 0`) so it never breaks a build while we learn the baseline.
+      # TO GATE: set `--severity CRITICAL --exit-code 1` — a critical then leaves the
+      # image UNSIGNED and Kyverno (fail-closed) won't admit it.
+      - name: Scan image for vulnerabilities (trivy, report-only)
+        env:
+          IMG: registry.voboril.xyz/melkite-docker/youtube-ics@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          command -v trivy >/dev/null 2>&1 || curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "$HOME/.local/bin"
+          export PATH="$HOME/.local/bin:$PATH"
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --format table "$IMG"
+
       # --- Sign the image (SLSA Build L2, ADR-0007) -----------------------------
       # Keyless cosign signature bound to this workflow's OIDC identity, pushed to the
       # JFrog image. Provider-neutral and works for PRIVATE repos (GitHub's attestation
