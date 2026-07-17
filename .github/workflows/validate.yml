@@ -1,0 +1,27 @@
+name: validate
+
+# PR gate (ADR-0007 Tier 1 / source track): proves the image builds before merge,
+# WITHOUT pushing or signing (that happens only on merge to main, in build.yml).
+# Runs on a GitHub-hosted runner — no JFrog/LAN or secrets needed for a push:false build.
+# Branch protection requires the `validate` check to pass.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
