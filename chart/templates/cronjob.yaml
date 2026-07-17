@@ -30,9 +30,13 @@ spec:
           restartPolicy: Never
           imagePullSecrets:
             - name: {{ .Values.imagePullSecretName }}
+          # PodSecurity "restricted"-compliant. fsGroup makes the PVC (and the SQLite
+          # store migrated into it) group-owned + group-writable by the non-root user.
           securityContext:
-            # Runs as root to match the root-owned SQLite store migrated from the LXC.
-            runAsUser: 0
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
             seccompProfile:
               type: RuntimeDefault
           containers:
@@ -45,14 +49,19 @@ spec:
                   value: {{ .Values.persistence.dbPath | quote }}
                 - name: LOOKAHEAD_DAYS
                   value: {{ .Values.lookaheadDays | quote }}
+                - name: HOME
+                  value: /tmp
               envFrom:
                 - secretRef:
                     name: youtube-ics-env
               volumeMounts:
                 - name: data
                   mountPath: {{ dir .Values.persistence.dbPath | quote }}
+                - name: tmp
+                  mountPath: /tmp
               securityContext:
                 allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
               resources:
@@ -61,3 +70,5 @@ spec:
             - name: data
               persistentVolumeClaim:
                 claimName: youtube-ics-data
+            - name: tmp
+              emptyDir: {}
