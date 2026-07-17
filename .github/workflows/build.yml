@@ -81,12 +81,16 @@ jobs:
       # image UNSIGNED and Kyverno (fail-closed) won't admit it.
       - name: Scan image for vulnerabilities (trivy, report-only)
         env:
+          TRIVY_USERNAME: ci-deployer                    # JFrog auth so trivy can PULL the private image
+          TRIVY_PASSWORD: ${{ secrets.JFROG_TOKEN }}
           IMG: registry.voboril.xyz/melkite-docker/youtube-ics@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           command -v trivy >/dev/null 2>&1 || curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "$HOME/.local/bin"
           export PATH="$HOME/.local/bin:$PATH"
-          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --format table "$IMG"
+          # report-only: trailing '|| true' so a trivy/network error never fails the build
+          # or leaves the image unsigned. To GATE: drop '|| true', use --severity CRITICAL --exit-code 1.
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --format table "$IMG" || true
 
       # --- Sign the image (SLSA Build L2, ADR-0007) -----------------------------
       # Keyless cosign signature bound to this workflow's OIDC identity, pushed to the
