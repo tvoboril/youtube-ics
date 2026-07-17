@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest        # GitHub-hosted → ephemeral & isolated (SLSA L3 env)
     outputs:
       image: ${{ steps.image.outputs.image }}
-      digest: ${{ steps.build.outputs.digest }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,46 +51,56 @@ jobs:
           username: ci-deployer
           password: ${{ secrets.JFROG_TOKEN }}
 
-      - name: Build & push (linux/amd64)
+      # SCAN-BEFORE-PUSH: build into the local docker daemon (no push, single-platform).
+      # BuildKit provenance/sbom dropped here (load can't take an OCI index; the L3
+      # provenance comes from the slsa-github-generator job below).
+      - name: Build & load (no push)
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
           platforms: linux/amd64
-          push: true
-          provenance: mode=max
-          sbom: true
+          push: false
+          load: true
           tags: registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      # Vulnerability scan — Phase E. Runs BEFORE signing: a fixable CRITICAL fails the
-      # build, so the image is left UNSIGNED → Kyverno won't admit it and the app stays on
-      # its last-good signed image. Counts CRITICALs from JSON, so a trivy/network ERROR
-      # yields 0 and does NOT fail the build.
+      # Vulnerability scan — Phase E. Scans the LOCAL image BEFORE it is pushed: a fixable
+      # CRITICAL fails the build and the image is NEVER pushed → nothing to sign, deploy, or
+      # roll back; the app stays on its last-good image, invisibly. Counts CRITICALs from
+      # JSON so a trivy error yields 0 and does not fail the build.
       - name: Scan image for vulnerabilities (trivy — gate on fixable CRITICAL)
         env:
-          TRIVY_USERNAME: ci-deployer
-          TRIVY_PASSWORD: ${{ secrets.JFROG_TOKEN }}
           TRIVY_DISABLE_VEX_NOTICE: "1"
-          IMG: registry.voboril.xyz/melkite-docker/youtube-ics@${{ steps.build.outputs.digest }}
+          IMG: registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
         run: |
           set -euo pipefail
           command -v trivy >/dev/null 2>&1 || curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "$HOME/.local/bin"
           export PATH="$HOME/.local/bin:$PATH"
-          trivy image --severity HIGH,CRITICAL --ignore-unfixed --format table "$IMG" || true   # informational
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --format table "$IMG" || true   # informational (local image)
           CRIT=$(trivy image --severity CRITICAL --ignore-unfixed --format json "$IMG" 2>/dev/null | jq '[.Results[]?.Vulnerabilities // [] | length] | add // 0' 2>/dev/null || echo 0)
           echo "fixable CRITICAL count: ${CRIT:-0}"
-          if [ "${CRIT:-0}" -gt 0 ]; then echo "::error::${CRIT} fixable CRITICAL vuln(s) — build fails, image left unsigned"; exit 1; fi
+          if [ "${CRIT:-0}" -gt 0 ]; then echo "::error::${CRIT} fixable CRITICAL vuln(s) — NOT pushing this image"; exit 1; fi
+
+      - name: Push clean image → JFrog
+        id: push
+        run: |
+          set -euo pipefail
+          IMG="registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}"
+          docker push "$IMG"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" | sed 's/.*@//')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "pushed $IMG @ $DIGEST"
 
       # Keyless cosign signature (Kyverno admission verifies this — unchanged).
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
       - name: Sign the image (keyless)
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign sign --yes "registry.voboril.xyz/melkite-docker/youtube-ics@${DIGEST}"
 
       # Helm chart (helm isn't preinstalled on GitHub-hosted runners).
