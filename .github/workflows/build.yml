@@ -1,0 +1,89 @@
+name: build
+
+# Build + publish youtube-ics on changes, on the self-hosted runner (LXC 106 on
+# philip) so it can push to the LAN-only JFrog registry. Mirrors the melkite-synaxis
+# _build-app.yml pattern:
+#   image -> registry.voboril.xyz/melkite-docker/youtube-ics:<7-char-sha>  (PRIMARY)
+#          + ghcr.io/tvoboril/youtube-ics:<7-char-sha>                     (BACKUP)
+#   chart -> oci://registry.voboril.xyz/melkite-helm/youtube-ics:<Chart.yaml version>
+#            (published only when that version isn't already there — bump to release)
+# Talos + Argo pull from JFrog; Argo CD Image Updater tracks newest-build by SHA tag.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "chart/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    # Dedicated youtube-ics runner on LXC 106 (label homelab); self-hosted so it can
+    # reach the LAN-only JFrog registry (registry.voboril.xyz -> 10.0.18.43).
+    runs-on: [self-hosted, homelab]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute short SHA
+        id: meta
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to JFrog (primary — LAN)
+        uses: docker/login-action@v3
+        with:
+          registry: registry.voboril.xyz
+          username: ci-deployer
+          password: ${{ secrets.JFROG_TOKEN }}
+
+      - name: Log in to GHCR (backup)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push (linux/amd64) — JFrog primary + GHCR backup
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
+            ghcr.io/tvoboril/youtube-ics:${{ steps.meta.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      # Publish the Helm chart to JFrog OCI only when Chart.yaml's version isn't already
+      # published — code-only builds skip it; bump chart/Chart.yaml to release a new one.
+      - name: Log in to JFrog for Helm (OCI)
+        run: |
+          export PATH="/usr/local/bin:$PATH"
+          echo "${{ secrets.JFROG_TOKEN }}" | helm registry login registry.voboril.xyz -u ci-deployer --password-stdin
+
+      - name: Publish Helm chart if version is new
+        run: |
+          set -euo pipefail
+          export PATH="/usr/local/bin:$PATH"
+          CHART_DIR="chart"
+          VER="$(awk '/^version:/{print $2; exit}' "$CHART_DIR/Chart.yaml")"
+          echo "chart youtube-ics version $VER"
+          if helm pull "oci://registry.voboril.xyz/melkite-helm/youtube-ics" --version "$VER" -d /tmp/chartcheck >/dev/null 2>&1; then
+            echo "chart youtube-ics:$VER already published — bump chart/Chart.yaml to release a new one; skipping push"
+          else
+            helm package "$CHART_DIR" -d /tmp/chartpkg
+            helm push "/tmp/chartpkg/youtube-ics-$VER.tgz" oci://registry.voboril.xyz/melkite-helm
+          fi
