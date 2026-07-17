@@ -75,15 +75,23 @@ jobs:
           echo "${{ secrets.JFROG_TOKEN }}" | helm registry login registry.voboril.xyz -u ci-deployer --password-stdin
 
       - name: Publish Helm chart if version is new
+        # The ci-deployer token can push new chart versions but not overwrite an existing
+        # one (and has no read on melkite-helm), so we can't pre-check with `helm pull`.
+        # Instead: always attempt the push; treat JFrog's "no permission to overwrite"
+        # 403 as an intentional skip (the version is already published — bump
+        # chart/Chart.yaml to release a new one).
         run: |
           set -euo pipefail
           export PATH="/usr/local/bin:$PATH"
           CHART_DIR="chart"
           VER="$(awk '/^version:/{print $2; exit}' "$CHART_DIR/Chart.yaml")"
           echo "chart youtube-ics version $VER"
-          if helm pull "oci://registry.voboril.xyz/melkite-helm/youtube-ics" --version "$VER" -d /tmp/chartcheck >/dev/null 2>&1; then
-            echo "chart youtube-ics:$VER already published — bump chart/Chart.yaml to release a new one; skipping push"
+          helm package "$CHART_DIR" -d /tmp/chartpkg
+          if helm push "/tmp/chartpkg/youtube-ics-$VER.tgz" oci://registry.voboril.xyz/melkite-helm 2>/tmp/helmpush.err; then
+            echo "published chart youtube-ics:$VER"
+          elif grep -qiE "overwrite|already exists" /tmp/helmpush.err; then
+            echo "chart youtube-ics:$VER already published — skipping (bump chart/Chart.yaml to release a new one)"
           else
-            helm package "$CHART_DIR" -d /tmp/chartpkg
-            helm push "/tmp/chartpkg/youtube-ics-$VER.tgz" oci://registry.voboril.xyz/melkite-helm
+            cat /tmp/helmpush.err >&2
+            exit 1
           fi
