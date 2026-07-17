@@ -29,8 +29,14 @@ On each run it reconciles the calendar against the channel:
 5. **Title & describe** to match the parish's format, e.g.
    `Orthros (Tone 5) and Divine Liturgy - 6th Sunday after Pentecost - 5 July 2026`.
 6. **Create / update / cancel** on YouTube (public, bound to a reusable RTMP stream), using
-   a small SQLite store for idempotency. Events removed from the calendar are cancelled;
-   existing channel broadcasts are **adopted** rather than duplicated if the store is lost.
+   a small SQLite store for idempotency. Reconcile compares against the channel's *actual*
+   state, so: events removed from the calendar are cancelled; existing channel broadcasts are
+   **adopted** rather than duplicated (surviving a lost store or a day whose office reshapes,
+   e.g. a standalone Orthros that later merges with the Divine Liturgy); a broadcast that
+   vanished from the channel is **re-created**; and once a broadcast exists, a **title you
+   edit in YouTube Studio is preserved** — never reverted and never a reason to re-create.
+   You want *Third Hour and Divine Liturgy* instead of the generated *Orthros …*? Rename it
+   in Studio and it sticks.
 
 ## Configuration
 
