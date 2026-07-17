@@ -1,0 +1,41 @@
+# youtube-ics — singleton CronJob that reconciles the parish calendar into YouTube
+# live broadcasts. Chart published to JFrog (oci://registry.voboril.xyz/melkite-helm)
+# and delivered by Argo CD. `image.tag` and `suspend` are overridden per-environment
+# from the philip-proxmox git values file (Argo multi-source), matching the melkite
+# apps; Image Updater writes image.tag back there.
+
+image:
+  repository: registry.voboril.xyz/melkite-docker/youtube-ics
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Pull secret materialized into this namespace by the cluster-wide jfrog-pull
+# ClusterExternalSecret (its namespaceSelector must include this namespace).
+imagePullSecretName: jfrog-pull
+
+# Reconcile cadence. The old LXC loop re-checked hourly and tightened to 15 min
+# before an event for last-minute cancellations; a flat */15 is simpler and at
+# least as responsive. Cron is evaluated in `timeZone` below.
+schedule: "*/15 * * * *"
+timeZone: America/Chicago
+
+# Overridden to false from git values once live. Default-safe if values are missing.
+suspend: true
+
+lookaheadDays: 14
+
+# Vault KV keys (mount `secret`, path convention melkite/<name>).
+vaultKey: melkite/youtube-ics   # app env: GOOGLE_OAUTH_*, YOUTUBE_STREAM_KEY, TYPIKON_API_URL
+
+persistence:
+  storageClass: local-path
+  size: 1Gi
+  # Absolute path of the SQLite file inside the container (matches the image default).
+  dbPath: /data/youtube_ics.sqlite
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

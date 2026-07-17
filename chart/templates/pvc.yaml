@@ -1,0 +1,16 @@
+# SQLite idempotency store. ReadWriteOnce + a singleton CronJob (concurrencyPolicy
+# Forbid) means at most one writer at a time. local-path is node-local, so the job
+# pins to whichever node binds this first — fine for a single-writer batch job.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: youtube-ics-data
+  labels:
+    app: youtube-ics
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}

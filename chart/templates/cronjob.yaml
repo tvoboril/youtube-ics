@@ -1,0 +1,63 @@
+# Singleton reconcile job. `run --once` does exactly one reconcile and exits, so a
+# CronJob is the natural fit. concurrencyPolicy: Forbid is the singleton guarantee —
+# two overlapping reconcile loops would race the YouTube API and could double-create
+# or double-cancel broadcasts. Never run more than one at a time.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: youtube-ics
+  labels:
+    app: youtube-ics
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  timeZone: {{ .Values.timeZone | quote }}
+  suspend: {{ .Values.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # A reconcile is seconds of work; cap a hung run so it can't block the next
+      # tick forever under concurrencyPolicy: Forbid.
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app: youtube-ics
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: {{ .Values.imagePullSecretName }}
+          securityContext:
+            # Runs as root to match the root-owned SQLite store migrated from the LXC.
+            runAsUser: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: youtube-ics
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["youtube-ics", "run", "--once"]
+              env:
+                - name: DB_PATH
+                  value: {{ .Values.persistence.dbPath | quote }}
+                - name: LOOKAHEAD_DAYS
+                  value: {{ .Values.lookaheadDays | quote }}
+              envFrom:
+                - secretRef:
+                    name: youtube-ics-env
+              volumeMounts:
+                - name: data
+                  mountPath: {{ dir .Values.persistence.dbPath | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: youtube-ics-data

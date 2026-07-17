@@ -1,0 +1,9 @@
+apiVersion: v2
+name: youtube-ics
+description: >-
+  Creates scheduled YouTube live broadcasts from the parish Google Calendar (ICS),
+  enriched from the melkite-typikon API. Runs as a singleton CronJob (`youtube-ics
+  run --once`) with a PVC-backed SQLite idempotency store. Outbound-only; no ingress.
+type: application
+version: 0.1.0
+appVersion: "eed5fc8"
