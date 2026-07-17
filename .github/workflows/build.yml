@@ -22,6 +22,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write      # OIDC → Sigstore keyless signing (SLSA provenance, ADR-0007)
+  attestations: write  # write attestations to the GitHub attestation store
 
 jobs:
   build:
@@ -54,6 +56,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push (linux/amd64) — JFrog primary + GHCR backup
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -66,6 +69,34 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+      # --- Supply-chain attestations (SLSA Build L2, ADR-0007) ------------------
+      # Sign SLSA provenance + an SBOM with the workflow's OIDC identity (Sigstore
+      # keyless) and push them as OCI *referrers* on the JFrog image, addressable by
+      # digest. JCR (Artifactory 7.104) supports the referrers API, so no tag-fallback.
+      # Both are also written to GitHub's attestation store (verify with `gh attestation
+      # verify oci://…`). Subject is the JFrog primary — the ref the cluster pulls.
+      - name: Attest build provenance (SLSA) → JFrog referrer
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: registry.voboril.xyz/melkite-docker/youtube-ics
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM (SPDX) from the pushed image
+        uses: anchore/sbom-action@v0
+        with:
+          image: registry.voboril.xyz/melkite-docker/youtube-ics@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest SBOM → JFrog referrer
+        uses: actions/attest-sbom@v2
+        with:
+          subject-name: registry.voboril.xyz/melkite-docker/youtube-ics
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true
 
       # Publish the Helm chart to JFrog OCI only when Chart.yaml's version isn't already
       # published — code-only builds skip it; bump chart/Chart.yaml to release a new one.
