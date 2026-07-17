@@ -67,9 +67,9 @@ jobs:
           push: true
           provenance: mode=max   # attach SLSA provenance to the image (BuildKit, ADR-0007)
           sbom: true             # attach an SPDX SBOM to the image
-          tags: |
-            registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
-            # ghcr.io/tvoboril/youtube-ics:${{ steps.meta.outputs.sha }}   # GHCR backup disabled
+          # GHCR backup disabled — JFrog only. Re-add an `ghcr.io/tvoboril/...` line
+          # (and the GHCR login step above) to restore the backup push.
+          tags: registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
