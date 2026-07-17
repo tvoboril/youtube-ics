@@ -66,8 +66,11 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-      # Vulnerability scan (report-only) — Phase E.
-      - name: Scan image for vulnerabilities (trivy, report-only)
+      # Vulnerability scan — Phase E. Runs BEFORE signing: a fixable CRITICAL fails the
+      # build, so the image is left UNSIGNED → Kyverno won't admit it and the app stays on
+      # its last-good signed image. Counts CRITICALs from JSON, so a trivy/network ERROR
+      # yields 0 and does NOT fail the build.
+      - name: Scan image for vulnerabilities (trivy — gate on fixable CRITICAL)
         env:
           TRIVY_USERNAME: ci-deployer
           TRIVY_PASSWORD: ${{ secrets.JFROG_TOKEN }}
@@ -77,7 +80,10 @@ jobs:
           set -euo pipefail
           command -v trivy >/dev/null 2>&1 || curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b "$HOME/.local/bin"
           export PATH="$HOME/.local/bin:$PATH"
-          trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 --format table "$IMG" || true
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --format table "$IMG" || true   # informational
+          CRIT=$(trivy image --severity CRITICAL --ignore-unfixed --format json "$IMG" 2>/dev/null | jq '[.Results[]?.Vulnerabilities // [] | length] | add // 0' 2>/dev/null || echo 0)
+          echo "fixable CRITICAL count: ${CRIT:-0}"
+          if [ "${CRIT:-0}" -gt 0 ]; then echo "::error::${CRIT} fixable CRITICAL vuln(s) — build fails, image left unsigned"; exit 1; fi
 
       # Keyless cosign signature (Kyverno admission verifies this — unchanged).
       - name: Install cosign
