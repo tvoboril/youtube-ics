@@ -103,6 +103,22 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign sign --yes "registry.voboril.xyz/melkite-docker/youtube-ics@${DIGEST}"
 
+      # SBOM (re-added). BuildKit's `sbom: true` was dropped when we moved to `load`-based
+      # scan-before-push (load can't emit an OCI index). Restore it as a SEPARATE
+      # attestation: syft reads the locally-loaded image (no re-pull) → SPDX-JSON; cosign
+      # attests it against the pushed DIGEST, so it rides alongside the `.sig` and the slsa
+      # `.att`, verifiable by digest (SLSA-ROADMAP #5).
+      - name: Generate & attest SBOM (syft → cosign attest, SPDX-JSON)
+        env:
+          LOCAL_IMG: registry.voboril.xyz/melkite-docker/youtube-ics:${{ steps.meta.outputs.sha }}
+          REF: registry.voboril.xyz/melkite-docker/youtube-ics@${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          command -v syft >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+          export PATH="$HOME/.local/bin:$PATH"
+          syft "docker:${LOCAL_IMG}" -o spdx-json > /tmp/sbom.spdx.json
+          cosign attest --yes --type spdxjson --predicate /tmp/sbom.spdx.json "$REF"
+
       # Helm chart (helm isn't preinstalled on GitHub-hosted runners).
       - name: Set up Helm
         uses: azure/setup-helm@v4
