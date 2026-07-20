@@ -79,10 +79,11 @@ def test_deleted_broadcast_is_recreated():
     assert store.get(_pb("a", 2026, 7, 12).key).youtube_id == "fake-yt-2"
 
 
-def test_office_reshape_adopts_shared_broadcast_without_cancelling_it():
-    """The July-26 regression: a standalone Orthros that later merges into Orthros+Liturgy.
+def test_office_reshape_updates_shared_broadcast_without_cancelling_it():
+    """A standalone Orthros that later merges into Orthros+Liturgy.
 
-    The merged key adopts the same-slot broadcast; the old standalone key's disappearance
+    The merged key reuses the same-slot broadcast and pushes the merged title/description onto
+    it (so it doesn't stay stuck as "Orthros"), while the old standalone key's disappearance
     must NOT cancel (delete) the broadcast the merged key now depends on.
     """
     store, sink = Store(":memory:"), FakeSink()
@@ -97,10 +98,35 @@ def test_office_reshape_adopts_shared_broadcast_without_cancelling_it():
         office=Office.ORTHROS_LITURGY, uids=["uidA", "uidB"],
     )
     summary = _reconcile([merged], store, sink)
-    assert summary.adopted == 1 and summary.cancelled == 0
+    assert summary.updated == 1 and summary.cancelled == 0
+    assert sink.updated[0][0] == yt  # merged title pushed onto the same broadcast
     assert not sink.cancelled  # the broadcast was never deleted
-    assert any(e.youtube_id == yt for e in sink.existing)  # still on the channel
+    assert any(e.youtube_id == yt and e.title == merged.title for e in sink.existing)
     assert store.get(merged.key).youtube_id == yt  # merged key now points at it
+    assert store.get(merged.key).title == merged.title
+    # A second identical sync settles to a plain no-op.
+    assert _reconcile([merged], store, sink).unchanged == 1
+
+
+def test_office_reshape_preserves_operator_rename():
+    """If the operator renamed the broadcast in Studio before it reshaped, don't clobber it."""
+    store, sink = Store(":memory:"), FakeSink()
+    standalone = _pb(
+        "uidA", 2026, 7, 12, title="Orthros", office=Office.ORTHROS, uids=["uidA"]
+    )
+    _reconcile([standalone], store, sink)
+    yt = store.get(standalone.key).youtube_id
+    sink.existing[0].title = "Orthros (special)"  # operator rename on the channel
+
+    merged = _pb(
+        "uidA", 2026, 7, 12, title="Orthros and Divine Liturgy",
+        office=Office.ORTHROS_LITURGY, uids=["uidA", "uidB"],
+    )
+    summary = _reconcile([merged], store, sink)
+    assert summary.adopted == 1 and summary.updated == 0
+    assert not sink.updated  # the operator's title is left untouched
+    assert store.get(merged.key).youtube_id == yt
+    assert store.get(merged.key).title == "Orthros (special)"
 
 
 def test_vanished_in_window_is_cancelled():
