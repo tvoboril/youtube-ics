@@ -81,18 +81,26 @@ def plan_actions(
     kept_ids: set[str] = set()
 
     def _adopt_or_create(p: PlannedBroadcast) -> None:
-        """No live broadcast tracked for this key: adopt one already at this slot, else create."""
+        """No live broadcast tracked for this key: reuse one already at this slot, else create."""
         slot = by_instant.get(_instant(p.start_utc.isoformat()))
-        if slot is not None:
-            # Preserve the channel's existing title — after a store loss or an office
-            # reshape it may be operator-set; we record the mapping without overwriting.
+        if slot is None:
+            actions.append(Action(ActionKind.CREATE, p.key, planned=p))
+            return
+        prior = store.get_by_youtube_id(slot.youtube_id)
+        if prior is not None and prior.title == slot.title:
+            # A broadcast *we* created, now re-keyed by an office reshape (e.g. a standalone
+            # Orthros that merged into Orthros + Divine Liturgy), and the channel title is still
+            # what we last wrote (the operator hasn't renamed it). Re-point the new key at the
+            # broadcast AND push the plan, so its title/description reflect the reshaped office.
+            actions.append(Action(ActionKind.UPDATE, p.key, planned=p, youtube_id=slot.youtube_id))
+        else:
+            # Store loss, or a broadcast we don't track (title may be operator-set): record the
+            # mapping and preserve the channel's current title rather than overwriting it.
             actions.append(
                 Action(ActionKind.ADOPT, p.key, planned=p, youtube_id=slot.youtube_id,
                        existing_title=slot.title)
             )
-            kept_ids.add(slot.youtube_id)
-        else:
-            actions.append(Action(ActionKind.CREATE, p.key, planned=p))
+        kept_ids.add(slot.youtube_id)
 
     for p in plan:
         planned_keys.add(p.key)

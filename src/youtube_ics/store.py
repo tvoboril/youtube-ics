@@ -63,6 +63,25 @@ class Store:
             row = cur.fetchone()
         return _record(row) if row else None
 
+    def get_by_youtube_id(self, youtube_id: str) -> Record | None:
+        """The scheduled row we last wrote for this broadcast, regardless of key.
+
+        Lets reconcile tell "a broadcast we created, now re-keyed by an office reshape" (this
+        returns a row) from "a broadcast we don't track / an operator's" (returns None).
+        """
+        with closing(
+            self._conn.execute(
+                """
+                SELECT * FROM broadcasts
+                WHERE youtube_id = ? AND status = 'scheduled'
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (youtube_id,),
+            )
+        ) as cur:
+            row = cur.fetchone()
+        return _record(row) if row else None
+
     def upsert(self, key: str, youtube_id: str, title: str, start_utc: str, content_hash: str) -> None:
         """Insert a new mapping or update an existing one (keeping created_at)."""
         now = _now_iso()
