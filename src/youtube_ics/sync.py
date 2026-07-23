@@ -7,9 +7,10 @@ dry run can print the exact actions without touching YouTube or the store.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 
+from .ics import PARISH_TZ
 from .plan import PlannedBroadcast
 from .sink import BroadcastSink, ExistingBroadcast
 from .store import Store
@@ -22,12 +23,6 @@ class ActionKind(str, Enum):
     CANCEL = "cancel"
     ADOPT = "adopt"  # store was empty/lost but the broadcast already exists → record it
     REAP = "reap"  # a past broadcast still stuck 'upcoming' → delete it before autostart grabs it
-
-
-# How far a broadcast's scheduled start must be in the past before we treat a still-'upcoming'
-# broadcast as a dead ghost and delete it. Generous enough to never touch a broadcast scheduled
-# earlier *today* that simply hasn't gone live yet (e.g. the encoder starts late).
-REAP_GRACE = timedelta(hours=12)
 
 
 def _instant(iso: str) -> float | None:
@@ -137,16 +132,24 @@ def plan_actions(
             actions.append(Action(ActionKind.CANCEL, rec.key, youtube_id=rec.youtube_id))
 
     # Reap dead ghosts: broadcasts still stuck 'upcoming' on the channel whose scheduled start
-    # is well in the past. A broadcast that actually streamed transitions to 'complete' and drops
-    # off list_upcoming; a live one is 'active' and also absent — so anything left here with a
-    # past start never went live. Because every broadcast is bound to the one reusable stream with
-    # autostart, such a ghost would be silently transitioned live the next time the encoder
+    # was on a *previous* day. A broadcast that actually streamed transitions to 'complete' and
+    # drops off list_upcoming; a live one is 'active' and also absent — so anything left here with
+    # a past start never went live. Because every broadcast is bound to the one reusable stream
+    # with autostart, such a ghost would be silently transitioned live the next time the encoder
     # connects (this is exactly how a past date "fired a second time"). Delete it.
-    reap_before = (window_start_utc - REAP_GRACE).timestamp()
+    #
+    # Threshold is the start of *today* in parish-local time, NOT a rolling hours window: a service
+    # that starts late (sometimes 30+ min after its scheduled time) must never be at risk, so we
+    # only ever reap broadcasts scheduled on an earlier calendar day.
+    reap_before = (
+        window_start_utc.astimezone(PARISH_TZ)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .timestamp()
+    )
     for eb in existing or []:
         inst = _instant(eb.start_utc)
         if inst is None or inst >= reap_before:
-            continue  # persistent/no-start broadcast, or recent/future — leave it
+            continue  # persistent/no-start broadcast, or scheduled today/future — leave it
         if eb.youtube_id in kept_ids:
             continue  # a surviving planned key still depends on it
         actions.append(Action(ActionKind.REAP, eb.youtube_id, youtube_id=eb.youtube_id))
