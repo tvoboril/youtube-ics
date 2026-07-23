@@ -203,13 +203,26 @@ def test_stale_upcoming_ghost_is_reaped():
     assert summary.created == 1  # the real plan item is still created alongside
 
 
-def test_recent_past_broadcast_within_grace_is_not_reaped():
-    """A broadcast scheduled just before the window (e.g. a late encoder start) is left alone."""
+def test_broadcast_scheduled_today_is_not_reaped_even_if_late():
+    """A service scheduled earlier *today* (its start already past because it began late, or
+    hasn't started yet) is never reaped — we only reap broadcasts from a previous day."""
+    # WIN_START is 2026-07-11T00:00Z = 2026-07-10 19:00 parish-local, so "today" is Jul 10.
     store, sink = Store(":memory:"), FakeSink()
-    sink.existing = [ExistingBroadcast("today-yt", "Vespers", "2026-07-10T20:00:00Z")]
+    # scheduled 09:00 parish-local the same day (14:00Z), well before "now" — a very late start.
+    sink.existing = [ExistingBroadcast("today-yt", "Orthros", "2026-07-10T14:00:00Z")]
     summary = _reconcile([], store, sink)
     assert summary.reaped == 0
     assert not sink.cancelled
+
+
+def test_broadcast_scheduled_yesterday_is_reaped():
+    """A ghost from a previous calendar day is reaped even if it was only hours ago."""
+    # "today" is Jul 10 parish-local; this start is late on Jul 9 (Jul 10 01:00Z), a prior day.
+    store, sink = Store(":memory:"), FakeSink()
+    sink.existing = [ExistingBroadcast("yesterday-yt", "Vespers", "2026-07-10T01:00:00Z")]
+    summary = _reconcile([], store, sink)
+    assert summary.reaped == 1
+    assert "yesterday-yt" in sink.cancelled
 
 
 def test_reap_leaves_persistent_no_start_broadcast_alone():
