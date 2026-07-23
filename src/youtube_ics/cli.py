@@ -22,6 +22,7 @@ _SYMBOL = {
     ActionKind.NOOP: "· unchanged",
     ActionKind.CANCEL: "✗ cancel",
     ActionKind.ADOPT: "⇄ adopt",
+    ActionKind.REAP: "☠ reap",
 }
 
 
@@ -68,7 +69,7 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         print(f"  {_SYMBOL[a.kind]:12} {when}  {title}")
     print(
         f"\n  create={summary.created} adopt={summary.adopted} update={summary.updated} "
-        f"unchanged={summary.unchanged} cancel={summary.cancelled}"
+        f"unchanged={summary.unchanged} cancel={summary.cancelled} reap={summary.reaped}"
     )
     store.close()
     return 0
@@ -146,7 +147,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(
             f"[{now:%Y-%m-%d %H:%M %Z}] create={summary.created} adopt={summary.adopted} "
             f"update={summary.updated} unchanged={summary.unchanged} cancel={summary.cancelled} "
-            f"→ next run {nxt:%Y-%m-%d %H:%M %Z}",
+            f"reap={summary.reaped} → next run {nxt:%Y-%m-%d %H:%M %Z}",
             flush=True,
         )
         if args.once:
