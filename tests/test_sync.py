@@ -192,6 +192,45 @@ def test_no_adopt_when_start_differs():
     assert summary.created == 1 and summary.adopted == 0  # different slot → real create
 
 
+def test_stale_upcoming_ghost_is_reaped():
+    """A past broadcast stuck 'upcoming' (never went live) is deleted so the shared-stream
+    autostart can't silently transition it live — the "fired a second time" bug."""
+    store, sink = Store(":memory:"), FakeSink()
+    sink.existing = [ExistingBroadcast("ghost-yt", "Orthros - 1 July 2026", "2026-07-01T14:00:00Z")]
+    summary = _reconcile([_pb("a", 2026, 7, 12)], store, sink)
+    assert summary.reaped == 1
+    assert "ghost-yt" in sink.cancelled
+    assert summary.created == 1  # the real plan item is still created alongside
+
+
+def test_recent_past_broadcast_within_grace_is_not_reaped():
+    """A broadcast scheduled just before the window (e.g. a late encoder start) is left alone."""
+    store, sink = Store(":memory:"), FakeSink()
+    sink.existing = [ExistingBroadcast("today-yt", "Vespers", "2026-07-10T20:00:00Z")]
+    summary = _reconcile([], store, sink)
+    assert summary.reaped == 0
+    assert not sink.cancelled
+
+
+def test_reap_leaves_persistent_no_start_broadcast_alone():
+    """A reusable/persistent broadcast has no scheduled start — never reap it."""
+    store, sink = Store(":memory:"), FakeSink()
+    sink.existing = [ExistingBroadcast("persistent-yt", "Saint George Live", "")]
+    summary = _reconcile([], store, sink)
+    assert summary.reaped == 0
+    assert not sink.cancelled
+
+
+def test_reap_skips_a_past_slot_the_plan_still_depends_on():
+    """If a surviving planned key adopts a past-dated slot, don't reap the broadcast under it."""
+    store, sink = Store(":memory:"), FakeSink()
+    p = _pb("a", 2026, 7, 1, title="Vespers - 1 July 2026")
+    sink.existing = [ExistingBroadcast("shared-yt", p.title, p.start_utc.isoformat())]
+    summary = _reconcile([p], store, sink)
+    assert summary.reaped == 0 and summary.adopted == 1
+    assert "shared-yt" not in sink.cancelled
+
+
 def test_cancelled_then_reappears_is_recreated():
     store, sink = Store(":memory:"), FakeSink()
     _reconcile([_pb("a", 2026, 7, 12)], store, sink)

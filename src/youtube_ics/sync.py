@@ -21,6 +21,13 @@ class ActionKind(str, Enum):
     NOOP = "noop"
     CANCEL = "cancel"
     ADOPT = "adopt"  # store was empty/lost but the broadcast already exists → record it
+    REAP = "reap"  # a past broadcast still stuck 'upcoming' → delete it before autostart grabs it
+
+
+# How far a broadcast's scheduled start must be in the past before we treat a still-'upcoming'
+# broadcast as a dead ghost and delete it. Generous enough to never touch a broadcast scheduled
+# earlier *today* that simply hasn't gone live yet (e.g. the encoder starts late).
+REAP_GRACE = timedelta(hours=12)
 
 
 def _instant(iso: str) -> float | None:
@@ -128,6 +135,21 @@ def plan_actions(
     for rec in store.active_between(window_start_utc.isoformat(), window_end_utc.isoformat()):
         if rec.key not in planned_keys and rec.youtube_id not in kept_ids:
             actions.append(Action(ActionKind.CANCEL, rec.key, youtube_id=rec.youtube_id))
+
+    # Reap dead ghosts: broadcasts still stuck 'upcoming' on the channel whose scheduled start
+    # is well in the past. A broadcast that actually streamed transitions to 'complete' and drops
+    # off list_upcoming; a live one is 'active' and also absent — so anything left here with a
+    # past start never went live. Because every broadcast is bound to the one reusable stream with
+    # autostart, such a ghost would be silently transitioned live the next time the encoder
+    # connects (this is exactly how a past date "fired a second time"). Delete it.
+    reap_before = (window_start_utc - REAP_GRACE).timestamp()
+    for eb in existing or []:
+        inst = _instant(eb.start_utc)
+        if inst is None or inst >= reap_before:
+            continue  # persistent/no-start broadcast, or recent/future — leave it
+        if eb.youtube_id in kept_ids:
+            continue  # a surviving planned key still depends on it
+        actions.append(Action(ActionKind.REAP, eb.youtube_id, youtube_id=eb.youtube_id))
     return actions
 
 
@@ -149,6 +171,13 @@ def apply_action(action: Action, store: Store, sink: BroadcastSink) -> None:
     elif action.kind is ActionKind.CANCEL:
         sink.cancel(action.youtube_id)
         store.mark_cancelled(action.key)
+    elif action.kind is ActionKind.REAP:
+        # Delete the stale broadcast from the channel; if we happen to track it, mark it cancelled
+        # so the store stops advertising it as live.
+        sink.cancel(action.youtube_id)
+        tracked = store.get_by_youtube_id(action.youtube_id)
+        if tracked is not None:
+            store.mark_cancelled(tracked.key)
     # NOOP: nothing to do
 
 
@@ -159,6 +188,7 @@ class ReconcileSummary:
     unchanged: int = 0
     cancelled: int = 0
     adopted: int = 0
+    reaped: int = 0
     actions: list[Action] = field(default_factory=list)
 
 
@@ -168,6 +198,7 @@ _COUNT_FIELD = {
     ActionKind.NOOP: "unchanged",
     ActionKind.CANCEL: "cancelled",
     ActionKind.ADOPT: "adopted",
+    ActionKind.REAP: "reaped",
 }
 
 
