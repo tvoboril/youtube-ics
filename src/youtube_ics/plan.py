@@ -53,6 +53,14 @@ def build_plan(
     occurrences = ics.expand_office_occurrences(cal, now, window_end)
     broadcasts = ics.assemble_broadcasts(occurrences)
 
+    # Drop services that have already started. `expand` returns occurrences that *overlap* the
+    # window (recurring_ical_events semantics), so an in-progress service is still present — but
+    # once it starts its broadcast has gone 'active' (off list_upcoming), and planning it again
+    # makes reconcile self-heal a duplicate bound to the shared stream. Filtering here, after the
+    # merge, judges the service as a whole: a merged Sunday's start is its Orthros start, so once
+    # that begins the whole unit drops — no lone-Liturgy fragment survives to be created solo.
+    broadcasts = [bc for bc in broadcasts if bc.start >= now]
+
     plan: list[PlannedBroadcast] = []
     for bc in broadcasts:
         try:
