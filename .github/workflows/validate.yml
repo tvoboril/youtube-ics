@@ -1,9 +1,17 @@
 name: validate
 
-# PR gate (ADR-0007 Tier 1 / source track): proves the image builds before merge,
-# WITHOUT pushing or signing (that happens only on merge to main, in build.yml).
-# Runs on a GitHub-hosted runner — no JFrog/LAN or secrets needed for a push:false build.
-# Branch protection requires the `validate` check to pass.
+# PR gate (ADR-0007 Tier 1 / source track). Branch protection on `main` requires
+# the `validate` check to pass.
+#
+# Deliberately does NOT build the image. It used to, and after the UBI9 migration
+# that meant joining the tailnet and dragging both python bases out of JFrog on
+# every push to a PR — minutes of setup and hundreds of MB of transfer to prove
+# something the merge build proves anyway. Same conclusion cw-neuro-trainer
+# reached: a PR gate only needs to know the code is good; the image is proved on
+# merge to main in build.yml, where it has to be built regardless.
+#
+# What is left is baseline and cheap: the package imports, the tests pass, and the
+# Dockerfile still pins its bases by digest.
 on:
   pull_request:
     branches: [main]
@@ -16,12 +24,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-      - name: Build image (no push)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
-          context: .
-          file: Dockerfile
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install (with dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Tests
+        run: pytest -q
+
+      # Cheap structural check on the Dockerfile: catches a base that has drifted
+      # to a floating tag without pulling a single layer.
+      - name: Bases are digest-pinned
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r img; do
+            if ! printf '%s' "$img" | grep -qE '@sha256:[0-9a-f]{64}$'; then
+              echo "::error file=Dockerfile::FROM is not digest-pinned: ${img}"
+              fail=1
+            fi
+          done < <(grep -E '^FROM' Dockerfile | sed -E 's/^FROM[[:space:]]+//; s/[[:space:]]+AS[[:space:]]+.*//')
+          [ "$fail" -eq 0 ] && echo "all FROM lines are digest-pinned"
+          exit "$fail"
