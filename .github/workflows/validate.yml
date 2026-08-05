@@ -2,8 +2,12 @@ name: validate
 
 # PR gate (ADR-0007 Tier 1 / source track): proves the image builds before merge,
 # WITHOUT pushing or signing (that happens only on merge to main, in build.yml).
-# Runs on a GitHub-hosted runner — no JFrog/LAN or secrets needed for a push:false build.
 # Branch protection requires the `validate` check to pass.
+#
+# This DOES need JFrog now. The Dockerfile builds FROM base-docker/*, which lives
+# only in JFrog, so even a push:false build has to pull the bases — it joins the
+# tailnet and logs in exactly like build.yml. (Before the UBI9 migration the base
+# was a public Docker Hub image and this workflow needed no secrets at all.)
 on:
   pull_request:
     branches: [main]
@@ -16,12 +20,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Join tailnet
+        uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          version: latest
+      - name: Route registry over Tailscale
+        run: echo "${{ vars.JFROG_TS_IP }} registry.voboril.xyz" | sudo tee -a /etc/hosts
+
+      # driver: docker so the base pull runs in the host dockerd and resolves the
+      # /etc/hosts pin. It also rules out the type=gha build cache, which the docker
+      # driver cannot export — a fair trade for a build that has to reach JFrog.
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver: docker
+
+      - name: Log in to JFrog (over Tailscale)
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: registry.voboril.xyz
+          username: ci-deployer
+          password: ${{ secrets.JFROG_TOKEN }}
+
       - name: Build image (no push)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile
+          platforms: linux/amd64
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
