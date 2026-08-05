@@ -16,6 +16,13 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  # One in-flight validate per branch. Pushing a fix to a PR cancels the
+  # previous run instead of leaving two gates racing — a superseded run can
+  # otherwise keep burning minutes against a branch that no longer exists.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
