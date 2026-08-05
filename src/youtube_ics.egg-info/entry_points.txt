@@ -1,0 +1,2 @@
+[console_scripts]
+youtube-ics = youtube_ics.cli:main
