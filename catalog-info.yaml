@@ -1,0 +1,20 @@
+# Backstage catalog entry (ADR-0008 slice 1).
+#
+# Runs as a singleton CronJob, not a Deployment — the Kubernetes tab shows the CronJob
+# and its most recent Job pods. kubernetes-label-selector rather than
+# backstage.io/kubernetes-id: the chart already labels pods `app: youtube-ics`, so no
+# chart version bump is needed.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: youtube-ics
+  description: Publishes an ICS calendar feed from YouTube scheduled streams (singleton CronJob)
+  annotations:
+    github.com/project-slug: tvoboril/youtube-ics
+    argocd/app-name: youtube-ics
+    backstage.io/kubernetes-label-selector: app=youtube-ics
+spec:
+  type: service
+  owner: group:default/lab
+  lifecycle: production
+  system: melkite
