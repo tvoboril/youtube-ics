@@ -5,7 +5,7 @@
 #
 # Stage 1 carries the wheel toolchain and installs into a virtualenv; stage 2 is
 # the minimal runtime and only receives the finished venv.
-FROM registry.voboril.xyz/base-docker/python312-build@sha256:93b6e345dbba7f32bcc842dbb8084ec2a20397ad9a352e10c76d1eeede18be73 AS build
+FROM registry.voboril.xyz/base-docker/python312-build@sha256:248df396b669934fa9cf346f48e9c300a702e0fbf644ee0a8e0a826205f1a3f3 AS build
 USER 0
 WORKDIR /app
 ENV PIP_NO_CACHE_DIR=1
@@ -15,7 +15,7 @@ RUN python3 -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip \
  && /opt/venv/bin/pip install .
 
-FROM registry.voboril.xyz/base-docker/python312-runtime@sha256:8f44dac783ab7bc9ff8ade993e8744a293c90d0e22977da2533e73e794174318
+FROM registry.voboril.xyz/base-docker/python312-runtime@sha256:1324d171223b14c1e37f95949ba57f7f1040a53cee3ba24cc4bbb622bf472ee0
 USER 0
 WORKDIR /app
 
